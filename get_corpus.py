@@ -1,11 +1,26 @@
 import re
 import requests
 import json
+import io
+import zipfile
+
+BASE_URL = 'https://api.github.com/repos/{user}/{repo}/'
 
 
 def get_repo(user, repo, language):
-    url = 'https://api.github.com/repos/{user}/{repo}/'.format(
-        user=user, repo=repo)
+    url = BASE_URL.format(user=user, repo=repo)
+    get_languages(url, language)
+    get_data(url)
+
+
+def get_data(url):
+    data = requests.get(url + 'zipball/master')
+    data.raise_for_status()
+    zip = zipfile.ZipFile(io.BytesIO(data.content))
+    print(zip.namelist())
+
+
+def get_languages(url, language):
     r = requests.get(url + 'languages')
     r.raise_for_status()
     languages = json.loads(r.text)
@@ -25,12 +40,6 @@ def main():
     test = list(repos)[0]
     get_repo(*test)
 
-    exit(0)
-    requests.get(
-        'https://api.github.com/repos/{user}/{repo}/zipball/master'.format(
-            user=test[0],
-            repo=test[1],
-            lang=test[2]))
 
 if __name__ == '__main__':
     main()
