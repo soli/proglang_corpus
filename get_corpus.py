@@ -3,6 +3,7 @@ import io
 import zipfile
 import base64
 import os.path
+import collections
 
 import requests
 import yaml
@@ -10,6 +11,7 @@ import yaml
 BASE_URL = 'https://api.github.com/repos/{user}/{repo}/'
 extension_index = {}
 filename_index = {}
+lang_data = collections.defaultdict(list)
 
 
 def get_repo(user, repo):
@@ -18,19 +20,27 @@ def get_repo(user, repo):
 
 
 def get_data(url):
+    global lang_data
     data = requests.get(url + 'zipball/master')
     data.raise_for_status()
     archive = zipfile.ZipFile(io.BytesIO(data.content))
     for name in archive.namelist():
         base = os.path.basename(name)
         if base:
-            print(base, end=': ')
             lang = filename_index.get(base)
             if not lang:
                 ext = os.path.splitext(base)[1]
                 if ext:
                     lang = extension_index.get(ext)
-            print(lang)
+            if lang:
+                with archive.open(name) as f:
+                    lang_data[lang].extend(f.readlines())
+
+
+def write_data():
+    for lang, lines in lang_data.items():
+        with open(os.path.join('corpus', lang), 'a') as f:
+            f.writelines([l.decode('utf-8') for l in lines])
 
 
 def get_important_repos():
@@ -71,6 +81,7 @@ def main():
     repos = get_important_repos()
     test = list(repos)[0]
     get_repo(*test)
+    write_data()
 
 if __name__ == '__main__':
     main()
