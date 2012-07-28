@@ -2,8 +2,11 @@ import re
 import io
 import zipfile
 import base64
+import os
 import os.path
+import errno
 import collections
+import itertools
 
 import requests
 import yaml
@@ -11,16 +14,18 @@ import yaml
 BASE_URL = 'https://api.github.com/repos/{user}/{repo}/'
 extension_index = {}
 filename_index = {}
-lang_data = collections.defaultdict(list)
+lang_data = None
 
 
 def get_repo(user, repo):
     url = BASE_URL.format(user=user, repo=repo)
     get_data(url)
+    write_data()
 
 
 def get_data(url):
     global lang_data
+    lang_data = collections.defaultdict(list)
     data = requests.get(url + 'zipball/master')
     data.raise_for_status()
     archive = zipfile.ZipFile(io.BytesIO(data.content))
@@ -40,7 +45,7 @@ def get_data(url):
 def write_data():
     for lang, lines in lang_data.items():
         with open(os.path.join('corpus', lang), 'a') as f:
-            f.writelines([l.decode('utf-8') for l in lines])
+            f.writelines([l.decode(errors='ignore') for l in lines])
 
 
 def get_important_repos():
@@ -49,8 +54,7 @@ def get_important_repos():
     url_matches = re.finditer(r'<a href="/(\w*)/([^/]*)">\2</a>\n',
                             important_repos.text)
     results = ((match.group(1), match.group(2)) for match in url_matches)
-    repos = ((user, repo) for ((user, repo), _) in zip(results, results))
-    return repos
+    return itertools.islice(results, 0, 100, 2)
 
 
 def init_linguist():
@@ -77,11 +81,18 @@ def build_index(linguist):
 
 
 def main():
+    try:
+        os.mkdir('corpus')
+    except OSError as e:
+        if e.errno != errno.EEXIST:
+            raise e
+        else:
+            print('the "corpus" directory already exists,',
+                  'all data will be appended to the existing files')
     init_linguist()
-    repos = get_important_repos()
-    test = list(repos)[0]
-    get_repo(*test)
-    write_data()
+    for (user, repo) in get_important_repos():
+        print('processing repo: {user}/{repo}'.format(user=user, repo=repo))
+        get_repo(user, repo)
 
 if __name__ == '__main__':
     main()
