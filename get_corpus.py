@@ -4,9 +4,9 @@ import zipfile
 import base64
 import os
 import os.path
-import errno
 import collections
 import itertools
+import tempfile
 
 import requests
 import yaml
@@ -14,47 +14,69 @@ import yaml
 BASE_URL = 'https://api.github.com/repos/{user}/{repo}/'
 extension_index = {}
 filename_index = {}
-lang_data = None
 
 
-def get_repo(user, repo):
+def process_repo(user, repo, corpus_dir):
+    '''append files of user/repo to language files in corpus_dir'''
+    print('processing repo: {user}/{repo}'.format(user=user, repo=repo))
     url = BASE_URL.format(user=user, repo=repo)
-    get_data(url)
-    write_data()
+    data = get_data(url)
+    write_data(data, corpus_dir)
 
 
 def get_data(url):
-    global lang_data
+    '''return dictionary lang -> lines for the github project given as url'''
     lang_data = collections.defaultdict(list)
+
     data = requests.get(url + 'zipball/master')
-    data.raise_for_status()
-    archive = zipfile.ZipFile(io.BytesIO(data.content))
+    try:
+        data.raise_for_status()
+    except requests.exceptions.HTTPError as e:
+        print('got ' + str(e) + ' when accessing ' + url)
+    else:
+        archive = zipfile.ZipFile(io.BytesIO(data.content))
+        update_lang_data(lang_data, archive)
+
+    return lang_data
+
+
+def update_lang_data(lang_data, archive):
+    '''for each recognized file in archive, add its lines to lang_data'''
     for name in archive.namelist():
         base = os.path.basename(name)
         if base:
-            lang = filename_index.get(base)
-            if not lang:
-                ext = os.path.splitext(base)[1]
-                if ext:
-                    lang = extension_index.get(ext)
+            lang = identify_lang(base)
             if lang:
                 with archive.open(name) as f:
                     lang_data[lang].extend(f.readlines())
 
 
-def write_data():
+def identify_lang(filename):
+    lang = filename_index.get(filename)
+    if not lang:
+        ext = os.path.splitext(filename)[1]
+        if ext:
+            lang = extension_index.get(ext)
+    return lang
+
+
+def write_data(lang_data, corpus_dir):
+    '''append lines stored in lang_data to files in corpus_dir
+    those files are named by language'''
     for lang, lines in lang_data.items():
-        with open(os.path.join('corpus', lang), 'a') as f:
+        with open(os.path.join(corpus_dir, lang), 'a') as f:
             f.writelines([l.decode(errors='ignore') for l in lines])
 
 
-def get_important_repos():
+def get_important_repos(num=25):
+    '''return the repositories listed on github "important" page
+    as a generator of pairs (user, repo)'''
     important_repos = requests.get('https://github.com/repositories')
     important_repos.raise_for_status()
     url_matches = re.finditer(r'<a href="/(\w*)/([^/]*)">\2</a>\n',
                             important_repos.text)
     results = ((match.group(1), match.group(2)) for match in url_matches)
-    return itertools.islice(results, 0, 100, 2)
+    return itertools.islice(results, 0, 2 * num, 2)
 
 
 def init_linguist():
@@ -81,18 +103,15 @@ def build_index(linguist):
 
 
 def main():
-    try:
-        os.mkdir('corpus')
-    except OSError as e:
-        if e.errno != errno.EEXIST:
-            raise e
-        else:
-            print('the "corpus" directory already exists,',
-                  'all data will be appended to the existing files')
     init_linguist()
-    for (user, repo) in get_important_repos():
-        print('processing repo: {user}/{repo}'.format(user=user, repo=repo))
-        get_repo(user, repo)
+    with tempfile.TemporaryDirectory() as corpus_dir:
+        for (user, repo) in get_important_repos():
+            process_repo(user, repo, corpus_dir)
+        with zipfile.ZipFile('corpus.zip', 'w',
+                             compression=zipfile.ZIP_DEFLATED) as myzip:
+            for langfile in os.listdir(corpus_dir):
+                myzip.write(os.path.join(corpus_dir, langfile),
+                            os.path.join('corpus', langfile))
 
 if __name__ == '__main__':
     main()
