@@ -4,7 +4,7 @@ Proglang Corpus
 
 This Python script will build a zip archive of some of the `most important
 Github repositories <https://github.com/repositories>`_ using Github's `API
-,<http://developer.github.com/v3/repos/contents/>`_ to access the contents.
+<http://developer.github.com/v3/repos/contents/>`_ to access the contents.
 The files are then concatenated by programming language, as determined by
 `Github's linguist repo <https://github.com/github/linguist/>`_.
 
